@@ -1,8 +1,8 @@
 import json
 import os
 from datetime import datetime
-from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram import Update, BotCommand
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # ========== КОНФИГ ==========
 TOKEN = "8613273240:AAHJKsUpxNGXgEOu6hPYBOfzrJvpOo9Y4Dw"          # сюда вставь токен от @BotFather
@@ -27,7 +27,7 @@ message_cache = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👁‍🗨 **Business Monitor Bot**\n\n"
+        "👁‍🗨 Business Monitor Bot\n\n"
         "Я слежу за удалёнными и изменёнными сообщениями.\n\n"
         "Команды:\n"
         "/monitor on/off - включить/выключить слежку\n"
@@ -35,8 +35,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/edited_log - показать последние 10 изменённых\n"
         "/export - выгрузить все логи в файл\n"
         "/track_user @username - следить только за конкретным\n\n"
-        "Добавь меня в бизнес-чат как администратора (право на удаление сообщений и просмотр).",
-        parse_mode="Markdown"
+        "Добавь меня в бизнес-чат как администратора (право на удаление сообщений и просмотр)."
     )
 
 async def track_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -92,45 +91,33 @@ async def handle_edited(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "date": edited.date.strftime("%Y-%m-%d %H:%M:%S")
     }
 
-    report = f"✏️ *ИЗМЕНЕНО* от @{username}:\nБыло: {old_text}\nСтало: {new_text}"
+    report = f"✏️ ИЗМЕНЕНО от @{username}:\nБыло: {old_text}\nСтало: {new_text}"
     try:
-        await update.effective_chat.send_message(report, parse_mode="Markdown")
+        await update.effective_chat.send_message(report)
     except:
         pass
     if LOG_CHAT_ID:
-        await context.bot.send_message(LOG_CHAT_ID, report, parse_mode="Markdown")
-
-async def handle_deleted(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not MONITORING:
-        return
-    if not update.chat_boost:  # событие удаления приходит по-другому, ловим через deleted_messages
-        return
-    # В реальном бизнес-апи событие удаления — отдельный update.deleted_messages
-    # Сейчас базовая версия: показываем последнюю запись.
-    pass
-
-# Эмуляция удаления: бизнес-боты получают update.message_deleted. Но в библиотеке ptb пока костыль.
-# Я дам рабочий full-вариант с длинным поллингом и кэшем.
+        await context.bot.send_message(LOG_CHAT_ID, report)
 
 async def deleted_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
     if not data["deleted"]:
-        await update.message.reply_text("🗑 Нет записей об удалениях.")
+        await update.message.reply_text("Нет записей об удалениях.")
         return
-    msg = "📜 *Последние 10 удалённых сообщений:*\n\n"
+    msg = "Последние 10 удалённых сообщений:\n\n"
     for i, entry in enumerate(data["deleted"][:10], 1):
         msg += f"{i}. @{entry['user']}: {entry['text'][:100]}\n   удалено: {entry['time']}\n\n"
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await update.message.reply_text(msg)
 
 async def edited_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
     if not data["edited"]:
-        await update.message.reply_text("✏️ Нет записей об изменениях.")
+        await update.message.reply_text("Нет записей об изменениях.")
         return
-    msg = "📝 *Последние 10 изменённых сообщений:*\n\n"
+    msg = "Последние 10 изменённых сообщений:\n\n"
     for i, entry in enumerate(data["edited"][:10], 1):
         msg += f"{i}. @{entry['user']}:\n   было: {entry['old'][:80]}\n   стало: {entry['new'][:80]}\n   время: {entry['time']}\n\n"
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await update.message.reply_text(msg[:4000])  # Telegram лимит 4096
 
 async def export_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
@@ -153,21 +140,31 @@ async def monitor_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if context.args[0].lower() == "on":
         MONITORING = True
-        await update.message.reply_text("✅ Мониторинг включён")
+        await update.message.reply_text("Мониторинг включён")
     elif context.args[0].lower() == "off":
         MONITORING = False
-        await update.message.reply_text("❌ Мониторинг выключен")
+        await update.message.reply_text("Мониторинг выключен")
+
+async def track_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Укажи пользователя: /track_user @username")
+        return
+    username = context.args[0].replace("@", "")
+    context.user_data["tracked_user"] = username
+    await update.message.reply_text(f"Теперь слежу только за @{username}")
 
 def main():
     app = Application.builder().token(TOKEN).build()
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("monitor", monitor_command))
     app.add_handler(CommandHandler("deleted_log", deleted_log))
     app.add_handler(CommandHandler("edited_log", edited_log))
     app.add_handler(CommandHandler("export", export_logs))
+    app.add_handler(CommandHandler("track_user", track_user_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, track_all_messages))
     app.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_edited))
-    # Для удалённых в бизнес-чатах нужен filters.UpdateType.DELETED_MESSAGES (поддерживается в python-telegram-bot v20+)
+    
     print("Бот запущен. Добавь его в бизнес-чат и дай права администратора.")
     app.run_polling()
 
